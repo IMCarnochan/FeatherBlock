@@ -4,23 +4,38 @@ from PIL import Image
 import plotly.graph_objects as go
 import numpy as np
 
-st.title("Longfeather's Minecraft Block Simulatorium")
+st.title("Longfeather's Simulatorium Cubed - Custom Textures")
 
-uploaded_file = st.file_uploader("Upload a thingy (square PNG or JPG)", type=["png", "jpg", "jpeg"])
+mode = st.radio("Texture mode:", ["Single texture (all sides)", "One texture per face"])
 
-if uploaded_file:
-    img = Image.open(uploaded_file).convert("RGB")
-    img = img.resize((64, 64))  # Resize for consistency
+def load_texture(label):
+    file = st.file_uploader(f"Upload {label} face texture", type=["png", "jpg", "jpeg"], key=label)
+    if file:
+        img = Image.open(file).convert("RGB")
+        img = img.resize((64, 64))
+        return np.array(img) / 255.0
+    return None
 
-    st.image(img, caption="Uploaded Texture", use_column_width=False)
+textures = {}
 
-    # Normalize texture
-    img_np = np.array(img) / 255.0
+if mode == "Single texture (all sides)":
+    texture = load_texture("All")
+    if texture is not None:
+        for face in ["Front", "Back", "Top", "Bottom", "Left", "Right"]:
+            textures[face] = texture
+elif mode == "One texture per face":
+    for face in ["Front", "Back", "Top", "Bottom", "Left", "Right"]:
+        textures[face] = load_texture(face)
 
-    # Create 3D surface texture map for 3 cube faces
-    def make_face(x0, x1, y0, y1, z, axis='z'):
-        X, Y = np.meshgrid(np.linspace(x0, x1, img_np.shape[1]), np.linspace(y0, y1, img_np.shape[0]))
-        Z = np.full_like(X, z)
+if all(v is not None for v in textures.values()):
+    def make_face(x0, x1, y0, y1, z0, z1, axis='z'):
+        res = 64
+        rng = np.linspace(0, 1, res)
+        X, Y = np.meshgrid(rng, rng)
+        X = x0 + (x1 - x0) * X
+        Y = y0 + (y1 - y0) * Y
+        Z = z0 + (z1 - z0) * np.ones_like(X)
+
         if axis == 'z':
             return X, Y, Z
         elif axis == 'y':
@@ -29,21 +44,25 @@ if uploaded_file:
             return Z, X, Y
 
     fig = go.Figure()
+    faces = [
+        ("Front", make_face(0, 1, 0, 1, 0, 0, 'z')),
+        ("Back", make_face(0, 1, 0, 1, 1, 1, 'z')),
+        ("Top", make_face(0, 1, 1, 1, 0, 1, 'y')),
+        ("Bottom", make_face(0, 1, 0, 0, 0, 1, 'y')),
+        ("Left", make_face(0, 0, 0, 1, 0, 1, 'x')),
+        ("Right", make_face(1, 1, 0, 1, 0, 1, 'x')),
+    ]
 
-    # Front face (z = 0)
-    x, y, z = make_face(0, 1, 0, 1, 0, axis='z')
-    fig.add_trace(go.Surface(x=x, y=y, z=z, surfacecolor=np.flipud(img_np[:, :, 0]), cmin=0, cmax=1,
-                             colorscale="gray", showscale=False))
-
-    # Top face (y = 1)
-    x, y, z = make_face(0, 1, 0, 1, 1, axis='y')
-    fig.add_trace(go.Surface(x=x, y=y, z=z, surfacecolor=np.flipud(img_np[:, :, 1]), cmin=0, cmax=1,
-                             colorscale="gray", showscale=False))
-
-    # Right face (x = 1)
-    x, y, z = make_face(0, 1, 0, 1, 1, axis='x')
-    fig.add_trace(go.Surface(x=x, y=y, z=z, surfacecolor=np.flipud(img_np[:, :, 2]), cmin=0, cmax=1,
-                             colorscale="gray", showscale=False))
+    for i, (name, (x, y, z)) in enumerate(faces):
+        tex = textures[name]
+        channel = tex[:, :, i % 3]
+        fig.add_trace(go.Surface(
+            x=x, y=y, z=z,
+            surfacecolor=np.flipud(channel),
+            cmin=0, cmax=1,
+            colorscale="gray",
+            showscale=False
+        ))
 
     fig.update_layout(
         scene=dict(
